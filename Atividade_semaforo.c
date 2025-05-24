@@ -34,6 +34,7 @@ SemaphoreHandle_t xButtonA_B;
 SemaphoreHandle_t xButtonC;
 SemaphoreHandle_t xLedsMutex;
 SemaphoreHandle_t xDisplayMutex;
+SemaphoreHandle_t xBuzzerMutex;
 
 // Variáveis para controle de debounce
 volatile uint32_t last_button_a_time = 0;
@@ -90,6 +91,7 @@ int main(void)
     buttons_init();
     npInit(7);
     display_init_all(&display);
+    inicializar_buzzer(BUZZER_PIN);
 
     stdio_init_all();
     printf("Iniciando...\n");
@@ -107,6 +109,7 @@ int main(void)
     xButtonC = xSemaphoreCreateBinary();
     xLedsMutex = xSemaphoreCreateMutex();
     xDisplayMutex = xSemaphoreCreateMutex();
+    xBuzzerMutex = xSemaphoreCreateMutex();
 
     // Cria ambas as tasks como requerido
     xTaskCreate(vTaskEntrada, "TaskEntrada", 256, NULL, 1, NULL);
@@ -136,26 +139,22 @@ void vTaskEntrada(void *pvParameters)
                 {
                     printf("Laboratório cheio!\n");
                 }
-            }
-            // Se não foi botão A, libera o semáforo para a outra task
-            else
-            {
-                xSemaphoreGive(xButtonA_B);
-            }
 
-            if (xSemaphoreTake(xLedsMutex, portMAX_DELAY) == pdTRUE)
-            {
-                if (current_people == Max)
+                if (xSemaphoreTake(xLedsMutex, portMAX_DELAY) == pdTRUE)
                 {
-                    acender_led_rgb_cor(COLOR_RED);
-                }
-                else if (current_people == (Max - 1))
-                {
-                    acender_led_rgb_cor(COLOR_YELLOW);
-                }
-                else if (current_people > 0)
-                {
-                    acender_led_rgb_cor(COLOR_GREEN);
+                    if (current_people == Max)
+                    {
+                        acender_led_rgb_cor(COLOR_RED);
+                    }
+                    else if (current_people == (Max - 1))
+                    {
+                        acender_led_rgb_cor(COLOR_YELLOW);
+                    }
+                    else if (current_people > 0)
+                    {
+                        acender_led_rgb_cor(COLOR_GREEN);
+                    }
+                    xSemaphoreGive(xLedsMutex);
                 }
 
                 if (xSemaphoreTake(xDisplayMutex, portMAX_DELAY) == pdTRUE)
@@ -168,13 +167,25 @@ void vTaskEntrada(void *pvParameters)
                     xSemaphoreGive(xDisplayMutex); // Não se esqueça de liberar o mutex!
                 }
 
-                xSemaphoreGive(xLedsMutex);
-                xSemaphoreGive(xDisplayMutex);
+                if (xSemaphoreTake(xBuzzerMutex, portMAX_DELAY) == pdTRUE)
+                {
+                    if (current_people == Max)
+                    {
+                        ativar_buzzer_com_intensidade(BUZZER_PIN, 1); // Buzzer ativo quando cheio
+                        vTaskDelay(pdMS_TO_TICKS(200));
+                        desativar_buzzer(BUZZER_PIN);
+                    }
+
+                    xSemaphoreGive(xBuzzerMutex);
+                }
+            }
+            else
+            {
+                xSemaphoreGive(xButtonA_B);
             }
         }
     }
 }
-
 void vTasksaida(void *pvParameters)
 {
     // Task que trata apenas saídas (botão B)
@@ -221,9 +232,20 @@ void vTasksaida(void *pvParameters)
                     ssd1306_send_data(&display);
                     xSemaphoreGive(xDisplayMutex); // Não se esqueça de liberar o mutex!
                 }
-            }
 
-            // Se não foi botão B, libera o semáforo para a outra task
+                // Comentado, pois, como o botão B só decrementa, não faz sentido o buzzer para o caso de tentar entrar com a fila cheia
+                // if (xSemaphoreTake(xBuzzerMutex, portMAX_DELAY) == pdTRUE)
+                // {
+                //     if (current_people == Max)
+                //     {
+                //         ativar_buzzer_com_intensidade(BUZZER_PIN, 1); // Buzzer ativo quando cheio
+                //         vTaskDelay(pdMS_TO_TICKS(200));
+                //         desativar_buzzer(BUZZER_PIN);
+                //     }
+
+                //     xSemaphoreGive(xBuzzerMutex);
+                // }
+            }
             else
             {
                 xSemaphoreGive(xButtonA_B);
