@@ -43,18 +43,19 @@ volatile uint32_t last_button_c_time = 0;
 
 void vTaskEntrada(void *pvParameters);
 void vTasksaida(void *pvParameters);
+void vTaskResetar(void *pvParameters);
 
 void gpio_irq_handler(uint gpio, uint32_t events)
 {
     uint32_t current_time = to_ms_since_boot(get_absolute_time());
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    
+
     if (gpio == BUTTON_A_PIN)
     {
         // Verifica debounce para botão A
         if (current_time - last_button_a_time > DEBOUNCE_TIME_MS)
         {
-            printf("Botão A pressionado!\n");
+            // printf("Botão A pressionado!\n"); // para debbuging
             last_button_a_time = current_time;
             last_button_was_A = true; // Define flag para incrementar
             xSemaphoreGiveFromISR(xButtonA_B, &xHigherPriorityTaskWoken);
@@ -65,7 +66,7 @@ void gpio_irq_handler(uint gpio, uint32_t events)
         // Verifica debounce para botão B
         if (current_time - last_button_b_time > DEBOUNCE_TIME_MS)
         {
-            printf("Botão B pressionado!\n");
+            // printf("Botão B pressionado!\n"); // para debbuging
             last_button_b_time = current_time;
             last_button_was_A = false; // Define flag para decrementar
             xSemaphoreGiveFromISR(xButtonA_B, &xHigherPriorityTaskWoken);
@@ -80,7 +81,7 @@ void gpio_irq_handler(uint gpio, uint32_t events)
             xSemaphoreGiveFromISR(xButtonC, &xHigherPriorityTaskWoken);
         }
     }
-    
+
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
@@ -98,7 +99,6 @@ int main(void)
     gpio_set_irq_enabled_with_callback(BUTTON_A_PIN, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
     gpio_set_irq_enabled_with_callback(BUTTON_B_PIN, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
     gpio_set_irq_enabled_with_callback(BUTTON_C_PIN, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
-    
 
     xButtonA_B = xSemaphoreCreateCounting(Max, 0);
     xButtonC = xSemaphoreCreateBinary();
@@ -106,6 +106,7 @@ int main(void)
     // Cria ambas as tasks como requerido
     xTaskCreate(vTaskEntrada, "TaskEntrada", 256, NULL, 1, NULL);
     xTaskCreate(vTasksaida, "TaskSaida", 256, NULL, 1, NULL);
+    xTaskCreate(vTaskResetar, "TaskResetar", 256, NULL, 1, NULL);
 
     // Inicia o agendador
     vTaskStartScheduler();
@@ -164,6 +165,19 @@ void vTasksaida(void *pvParameters)
             {
                 xSemaphoreGive(xButtonA_B);
             }
+        }
+    }
+}
+
+void vTaskResetar(void *pvParameters)
+{
+    // Task que trata o botão C (resetar)
+    while (1)
+    {
+        if (xSemaphoreTake(xButtonC, portMAX_DELAY) == pdTRUE)
+        {
+            current_people = 0;
+            printf("Contador resetado. Total: %d\n", current_people);
         }
     }
 }
