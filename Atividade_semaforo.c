@@ -54,8 +54,13 @@ void gpio_irq_handler(uint gpio, uint32_t events)
     if (gpio == BUTTON_A_PIN)
     {
         // Verifica debounce para botão A
-        if (current_time - last_button_a_time > DEBOUNCE_TIME_MS)
+        
+        if ( (current_time - last_button_a_time > DEBOUNCE_TIME_MS) && (current_people < Max))
         {
+            // Só entra aqui, se o número de pessoas não forem máximas
+            // Por exemplo, posso dar 8 give, ou seja, liberar 8 tokens por vez, que corresponde ao meu máximo.
+            // Se eu dei 8 tokens, e cada um destes fora consumido, é necessário então, que seja apertado o botão b, para liberar eles
+            // Por exemplo, se eu der 8 tarefas aqui, e as 8 foram consumidas, então, aqui, não entra mais.
             // printf("Botão A pressionado!\n"); // para debbuging
             last_button_a_time = current_time;
             last_button_was_A = true; // Define flag para incrementar
@@ -65,8 +70,9 @@ void gpio_irq_handler(uint gpio, uint32_t events)
     else if (gpio == BUTTON_B_PIN)
     {
         // Verifica debounce para botão B
-        if (current_time - last_button_b_time > DEBOUNCE_TIME_MS)
+        if ( (current_time - last_button_b_time > DEBOUNCE_TIME_MS) && (current_people >= 0))
         {
+            // Só entra aqui, se tiver pessoas no laboratório, logo, esta ISR, irá givar um token, 
             // printf("Botão B pressionado!\n"); // para debbuging
             last_button_b_time = current_time;
             last_button_was_A = false; // Define flag para decrementar
@@ -106,7 +112,7 @@ int main(void)
     gpio_set_irq_enabled_with_callback(BUTTON_B_PIN, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
     gpio_set_irq_enabled_with_callback(BUTTON_C_PIN, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
 
-    xButtonA_B = xSemaphoreCreateCounting(Max, 0);
+    xButtonA_B = xSemaphoreCreateCounting(Max, current_people);
     xButtonC = xSemaphoreCreateBinary();
     xLedsMutex = xSemaphoreCreateMutex();
     xDisplayMutex = xSemaphoreCreateMutex();
@@ -131,9 +137,11 @@ void vTaskEntrada(void *pvParameters)
         {
             if (last_button_was_A) // Verifica se foi o botão A
             {
+                current_people++; // Se não passar de 8 aqui, é porque deu certo.
+
                 if (current_people < Max)
                 {
-                    current_people++;
+                    // current_people++; // Local que estava incrementando antes
                     printf("Entrou uma pessoa. Total: %d\n", current_people);
                 }
                 else
