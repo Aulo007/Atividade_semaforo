@@ -11,9 +11,4 @@
 // Função para inicializar todos os botões
 void buttons_init(void);
 
-// Função para registrar um callback de interrupção para um botão específico
-// button_pin: o pino do botão a ser configurado
-// handler: o ponteiro para a função de callback
-void button_set_irq_callback(uint gpio_pin, gpio_irq_callback_t handler);
-
 #endif // BUTTONS_H
