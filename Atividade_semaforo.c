@@ -262,6 +262,39 @@ void vTaskResetar(void *pvParameters)
         if (xSemaphoreTake(xButtonC, portMAX_DELAY) == pdTRUE)
         {
             current_people = 0;
+
+            if (xSemaphoreTake(xDisplayMutex, portMAX_DELAY) == pdTRUE)
+            {
+                ssd1306_fill(&display, false);
+                char buffer[20];                               // Aumente o tamanho do buffer para garantir espaço suficiente
+                sprintf(buffer, "Pessoas:%d", current_people); // Forma correta de usar sprintf
+                ssd1306_draw_string(&display, buffer, 0, 0);
+                ssd1306_send_data(&display);
+                xSemaphoreGive(xDisplayMutex); // Não se esqueça de liberar o mutex!
+            }
+
+            if (xSemaphoreTake(xLedsMutex, portMAX_DELAY) == pdTRUE)
+            {
+
+                acender_led_rgb_cor(COLOR_GREEN);
+
+                xSemaphoreGive(xLedsMutex);
+            }
+
+            if (xSemaphoreTake(xBuzzerMutex, portMAX_DELAY) == pdTRUE)
+            {
+
+                ativar_buzzer_com_intensidade(BUZZER_PIN, 1); // Buzzer ativo quando cheio
+                vTaskDelay(pdMS_TO_TICKS(200));
+                desativar_buzzer(BUZZER_PIN);
+                vTaskDelay(pdMS_TO_TICKS(200));
+                ativar_buzzer_com_intensidade(BUZZER_PIN, 1); // Buzzer ativo quando cheio
+                vTaskDelay(pdMS_TO_TICKS(200));
+                desativar_buzzer(BUZZER_PIN);
+
+                xSemaphoreGive(xBuzzerMutex);
+            }
+
             printf("Contador resetado. Total: %d\n", current_people);
         }
     }
