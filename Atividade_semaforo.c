@@ -44,6 +44,7 @@ volatile uint32_t last_button_c_time = 0;
 void vTaskEntrada(void *pvParameters);
 void vTasksaida(void *pvParameters);
 void vTaskResetar(void *pvParameters);
+void display_exibir();
 
 void gpio_irq_handler(uint gpio, uint32_t events)
 {
@@ -159,11 +160,7 @@ void vTaskEntrada(void *pvParameters)
 
                 if (xSemaphoreTake(xDisplayMutex, portMAX_DELAY) == pdTRUE)
                 {
-                    ssd1306_fill(&display, false);
-                    char buffer[20];                               // Aumente o tamanho do buffer para garantir espaço suficiente
-                    sprintf(buffer, "Pessoas:%d", current_people); // Forma correta de usar sprintf
-                    ssd1306_draw_string(&display, buffer, 0, 0);
-                    ssd1306_send_data(&display);
+                    display_exibir();              // Atualiza o display
                     xSemaphoreGive(xDisplayMutex); // Não se esqueça de liberar o mutex!
                 }
 
@@ -225,26 +222,9 @@ void vTasksaida(void *pvParameters)
 
                 if (xSemaphoreTake(xDisplayMutex, portMAX_DELAY) == pdTRUE)
                 {
-                    ssd1306_fill(&display, false);
-                    char buffer[20];                               // Aumente o tamanho do buffer para garantir espaço suficiente
-                    sprintf(buffer, "Pessoas:%d", current_people); // Forma correta de usar sprintf
-                    ssd1306_draw_string(&display, buffer, 0, 0);
-                    ssd1306_send_data(&display);
+                    display_exibir();              // Atualiza o display
                     xSemaphoreGive(xDisplayMutex); // Não se esqueça de liberar o mutex!
                 }
-
-                // Comentado, pois, como o botão B só decrementa, não faz sentido o buzzer para o caso de tentar entrar com a fila cheia
-                // if (xSemaphoreTake(xBuzzerMutex, portMAX_DELAY) == pdTRUE)
-                // {
-                //     if (current_people == Max)
-                //     {
-                //         ativar_buzzer_com_intensidade(BUZZER_PIN, 1); // Buzzer ativo quando cheio
-                //         vTaskDelay(pdMS_TO_TICKS(200));
-                //         desativar_buzzer(BUZZER_PIN);
-                //     }
-
-                //     xSemaphoreGive(xBuzzerMutex);
-                // }
             }
             else
             {
@@ -265,11 +245,7 @@ void vTaskResetar(void *pvParameters)
 
             if (xSemaphoreTake(xDisplayMutex, portMAX_DELAY) == pdTRUE)
             {
-                ssd1306_fill(&display, false);
-                char buffer[20];                               // Aumente o tamanho do buffer para garantir espaço suficiente
-                sprintf(buffer, "Pessoas:%d", current_people); // Forma correta de usar sprintf
-                ssd1306_draw_string(&display, buffer, 0, 0);
-                ssd1306_send_data(&display);
+                display_exibir();              // Atualiza o display
                 xSemaphoreGive(xDisplayMutex); // Não se esqueça de liberar o mutex!
             }
 
@@ -298,4 +274,42 @@ void vTaskResetar(void *pvParameters)
             printf("Contador resetado. Total: %d\n", current_people);
         }
     }
+}
+
+void display_exibir()
+{
+    ssd1306_fill(&display, false);
+
+    // Linha 1: Título
+    ssd1306_draw_string(&display, "=LAB CONTROL=", 0, 0);
+
+    // Linha 2: Ocupação atual
+    char buffer1[20];
+    sprintf(buffer1, "Pessoas: %d/%d", current_people, Max);
+    ssd1306_draw_string(&display, buffer1, 0, 16);
+
+    // Linha 3: Status
+    char *status;
+    if (current_people == 0)
+        status = "VAZIO";
+    else if (current_people == Max)
+        status = "LOTADO";
+    else if (current_people >= Max - 1)
+        status = "QUASE LOTADO";
+    else
+        status = "DISPONIVEL";
+
+    ssd1306_draw_string(&display, status, 0, 32);
+
+    // Linha 4: Barra visual simples
+    char barra[17] = "================"; // 16 caracteres
+    int ocupados = (current_people * 16) / Max;
+    for (int i = ocupados; i < 16; i++)
+    {
+        barra[i] = '-';
+    }
+    barra[16] = '\0';
+    ssd1306_draw_string(&display, barra, 0, 48);
+
+    ssd1306_send_data(&display);
 }
