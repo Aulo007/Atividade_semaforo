@@ -35,6 +35,7 @@ volatile bool last_button_was_A = true; // true = incrementar, false = decrement
 
 SemaphoreHandle_t xButtonA_B;
 SemaphoreHandle_t xButtonC;
+SemaphoreHandle_t xLedsMutex;
 
 // Variáveis para controle de debounce
 volatile uint32_t last_button_a_time = 0;
@@ -44,6 +45,7 @@ volatile uint32_t last_button_c_time = 0;
 void vTaskEntrada(void *pvParameters);
 void vTasksaida(void *pvParameters);
 void vTaskResetar(void *pvParameters);
+void vTaskLeds(void *pvParameters);
 
 void gpio_irq_handler(uint gpio, uint32_t events)
 {
@@ -92,9 +94,12 @@ int main(void)
     npInit(7);
 
     stdio_init_all();
+    printf("Iniciando...\n");
+
     sleep_ms(3000); // tempo para terminal abrir via USB
 
-    printf("Iniciando...\n");
+    printf("Programa iniciado!\n");
+    acender_led_rgb_cor(COLOR_BLUE);
 
     gpio_set_irq_enabled_with_callback(BUTTON_A_PIN, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
     gpio_set_irq_enabled_with_callback(BUTTON_B_PIN, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
@@ -102,6 +107,7 @@ int main(void)
 
     xButtonA_B = xSemaphoreCreateCounting(Max, 0);
     xButtonC = xSemaphoreCreateBinary();
+    xLedsMutex = xSemaphoreCreateMutex();
 
     // Cria ambas as tasks como requerido
     xTaskCreate(vTaskEntrada, "TaskEntrada", 256, NULL, 1, NULL);
@@ -137,6 +143,24 @@ void vTaskEntrada(void *pvParameters)
             {
                 xSemaphoreGive(xButtonA_B);
             }
+
+            if (xSemaphoreTake(xLedsMutex, portMAX_DELAY) == pdTRUE)
+            {
+                if (current_people == Max)
+                {
+                    acender_led_rgb_cor(COLOR_RED);
+                }
+                else if (current_people == (Max - 1))
+                {
+                    acender_led_rgb_cor(COLOR_YELLOW);
+                }
+                else if (current_people > 0)
+                {
+                    acender_led_rgb_cor(COLOR_GREEN);
+                }
+
+                xSemaphoreGive(xLedsMutex);
+            }
         }
     }
 }
@@ -158,6 +182,24 @@ void vTasksaida(void *pvParameters)
                 else
                 {
                     printf("Laboratório vazio!\n");
+                }
+
+                if (xSemaphoreTake(xLedsMutex, portMAX_DELAY) == pdTRUE)
+                {
+                    if (current_people == Max)
+                    {
+                        acender_led_rgb_cor(COLOR_RED);
+                    }
+                    else if (current_people == (Max - 1))
+                    {
+                        acender_led_rgb_cor(COLOR_YELLOW);
+                    }
+                    else if (current_people > 0)
+                    {
+                        acender_led_rgb_cor(COLOR_GREEN);
+                    }
+
+                    xSemaphoreGive(xLedsMutex);
                 }
             }
             // Se não foi botão B, libera o semáforo para a outra task
