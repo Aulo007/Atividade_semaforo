@@ -10,20 +10,16 @@
 #include <stdio.h>
 #include "pico/time.h"
 #include "hardware/timer.h"
-#include "lib/ssd1306.h"
 #include "lib/matrizRGB.h"
 #include "buzzer.h"
 #include "extras/Desenho.h"
 #include "math.h"
 #include "lib/leds.h"
 #include "lib/buttons.h"
+#include "lib/display_utils.h"
 
 #define MAX_JOYSTICK_VALUE 4074 // Maior Valor encontrando por meio de debbugação
 #define MIN_JOYSTICK_VALUE 11   // Menor Valor encontrado por meio de debbugação
-#define I2C_PORT i2c1           // Porta I2C utilizada
-#define I2C_SDA 14              // Pino de dados SDA
-#define I2C_SCL 15              // Pino de clock SCL
-#define DISPLAY_ADDR 0x3C       // Endereço I2C do display OLED
 #define BUZZER_PIN 21           // Pino do buzzer
 #define DEBOUNCE_TIME_MS 200    // Tempo de debounce em milissegundos
 
@@ -36,6 +32,7 @@ volatile bool last_button_was_A = true; // true = incrementar, false = decrement
 SemaphoreHandle_t xButtonA_B;
 SemaphoreHandle_t xButtonC;
 SemaphoreHandle_t xLedsMutex;
+SemaphoreHandle_t xDisplayMutex;
 
 // Variáveis para controle de debounce
 volatile uint32_t last_button_a_time = 0;
@@ -45,7 +42,6 @@ volatile uint32_t last_button_c_time = 0;
 void vTaskEntrada(void *pvParameters);
 void vTasksaida(void *pvParameters);
 void vTaskResetar(void *pvParameters);
-void vTaskLeds(void *pvParameters);
 
 void gpio_irq_handler(uint gpio, uint32_t events)
 {
@@ -92,6 +88,8 @@ int main(void)
     led_init();
     buttons_init();
     npInit(7);
+    ssd1306_t display;
+    display_init_all(&display);
 
     stdio_init_all();
     printf("Iniciando...\n");
@@ -108,6 +106,7 @@ int main(void)
     xButtonA_B = xSemaphoreCreateCounting(Max, 0);
     xButtonC = xSemaphoreCreateBinary();
     xLedsMutex = xSemaphoreCreateMutex();
+    xDisplayMutex = xSemaphoreCreateMutex();
 
     // Cria ambas as tasks como requerido
     xTaskCreate(vTaskEntrada, "TaskEntrada", 256, NULL, 1, NULL);
