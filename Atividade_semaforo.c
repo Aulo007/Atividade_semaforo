@@ -22,6 +22,7 @@
 #define MIN_JOYSTICK_VALUE 11   // Menor Valor encontrado por meio de debbugação
 #define BUZZER_PIN 21           // Pino do buzzer
 #define DEBOUNCE_TIME_MS 200    // Tempo de debounce em milissegundos
+static ssd1306_t display;
 
 const int volatile Max = 8;      // Número máximo de pessoas no laboratório
 volatile int current_people = 0; // Contador de pessoas no laboratório
@@ -88,7 +89,6 @@ int main(void)
     led_init();
     buttons_init();
     npInit(7);
-    ssd1306_t display;
     display_init_all(&display);
 
     stdio_init_all();
@@ -158,7 +158,18 @@ void vTaskEntrada(void *pvParameters)
                     acender_led_rgb_cor(COLOR_GREEN);
                 }
 
+                if (xSemaphoreTake(xDisplayMutex, portMAX_DELAY) == pdTRUE)
+                {
+                    ssd1306_fill(&display, false);
+                    char buffer[20];                               // Aumente o tamanho do buffer para garantir espaço suficiente
+                    sprintf(buffer, "Pessoas:%d", current_people); // Forma correta de usar sprintf
+                    ssd1306_draw_string(&display, buffer, 0, 0);
+                    ssd1306_send_data(&display);
+                    xSemaphoreGive(xDisplayMutex); // Não se esqueça de liberar o mutex!
+                }
+
                 xSemaphoreGive(xLedsMutex);
+                xSemaphoreGive(xDisplayMutex);
             }
         }
     }
@@ -200,7 +211,18 @@ void vTasksaida(void *pvParameters)
 
                     xSemaphoreGive(xLedsMutex);
                 }
+
+                if (xSemaphoreTake(xDisplayMutex, portMAX_DELAY) == pdTRUE)
+                {
+                    ssd1306_fill(&display, false);
+                    char buffer[20];                               // Aumente o tamanho do buffer para garantir espaço suficiente
+                    sprintf(buffer, "Pessoas:%d", current_people); // Forma correta de usar sprintf
+                    ssd1306_draw_string(&display, buffer, 0, 0);
+                    ssd1306_send_data(&display);
+                    xSemaphoreGive(xDisplayMutex); // Não se esqueça de liberar o mutex!
+                }
             }
+
             // Se não foi botão B, libera o semáforo para a outra task
             else
             {
