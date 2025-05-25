@@ -61,7 +61,7 @@ void gpio_irq_handler(uint gpio, uint32_t events)
     if (gpio == BUTTON_A_PIN)
     {
         // Verifica debounce para botão A - Entrada
-        if ((current_time - last_button_a_time > DEBOUNCE_TIME_MS) && (current_people < Max))
+        if ((current_time - last_button_a_time > DEBOUNCE_TIME_MS))
         {
             last_button_a_time = current_time;
             generic_button_state = incrementar; // Define flag para incrementar
@@ -132,10 +132,10 @@ void vTaskEntrada(void *pvParameters)
     // Task que trata apenas entradas (botão A)
     while (1)
     {
-        if (generic_button_state == incrementar)
+        if ((generic_button_state == incrementar) && (current_people < Max))
         {
             // Tenta consumir um token (entrada só é permitida se há tokens disponíveis)
-            if (xSemaphoreTake(xButtonA_B, portMAX_DELAY) == pdTRUE)
+            if (xSemaphoreTake(xButtonA_B, 0) == pdTRUE)
             {
                 generic_button_state = desativar;
                 current_people++; // Incrementa o contador de pessoas
@@ -175,6 +175,20 @@ void vTaskEntrada(void *pvParameters)
                     }
                     xSemaphoreGive(xBuzzerMutex);
                 }
+            }
+        }
+        else if (generic_button_state == incrementar)
+        {
+            generic_button_state = desativar;
+            if (xSemaphoreTake(xBuzzerMutex, portMAX_DELAY) == pdTRUE)
+            {
+                if (current_people == Max)
+                {
+                    ativar_buzzer_com_intensidade(BUZZER_PIN, 1);
+                    vTaskDelay(pdMS_TO_TICKS(200));
+                    desativar_buzzer(BUZZER_PIN);
+                }
+                xSemaphoreGive(xBuzzerMutex);
             }
         }
         vTaskDelay(pdMS_TO_TICKS(10)); // Pequeno delay para evitar busy waiting
