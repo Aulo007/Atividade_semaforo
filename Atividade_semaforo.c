@@ -24,7 +24,7 @@
 #define DEBOUNCE_TIME_MS 200    // Tempo de debounce em milissegundos
 static ssd1306_t display;
 
-const int volatile Max = 8;      // Número máximo de pessoas no laboratório
+const int volatile Max = 9;      // Número máximo de pessoas no laboratório
 volatile int current_people = 0; // Contador de pessoas no laboratório
 
 typedef enum
@@ -36,12 +36,12 @@ typedef enum
 
 volatile botao_t generic_button_state = desativar;
 
-SemaphoreHandle_t xNotificar;
 SemaphoreHandle_t xButtonA_B;
 SemaphoreHandle_t xButtonC;
 SemaphoreHandle_t xLedsMutex;
 SemaphoreHandle_t xDisplayMutex;
 SemaphoreHandle_t xBuzzerMutex;
+SemaphoreHandle_t xMatrizMutex;
 
 // Variáveis para controle de debounce
 volatile uint32_t last_button_a_time = 0;
@@ -52,6 +52,7 @@ void vTaskEntrada(void *pvParameters);
 void vTasksaida(void *pvParameters);
 void vTaskResetar(void *pvParameters);
 void display_exibir();
+void matriz_exibir();
 
 void gpio_irq_handler(uint gpio, uint32_t events)
 {
@@ -110,12 +111,12 @@ int main(void)
     gpio_set_irq_enabled_with_callback(BUTTON_C_PIN, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
 
     // Criação dos semáforos
-    xNotificar = xSemaphoreCreateBinary();
     xButtonA_B = xSemaphoreCreateCounting(Max, Max); // Inicia com Max tokens (lab vazio)
     xButtonC = xSemaphoreCreateBinary();
     xLedsMutex = xSemaphoreCreateMutex();
     xDisplayMutex = xSemaphoreCreateMutex();
     xBuzzerMutex = xSemaphoreCreateMutex();
+    xMatrizMutex = xSemaphoreCreateMutex();
 
     // Cria ambas as tasks como requerido
     xTaskCreate(vTaskEntrada, "TaskEntrada", 256, NULL, 1, NULL);
@@ -139,6 +140,12 @@ void vTaskEntrada(void *pvParameters)
             {
                 generic_button_state = desativar;
                 current_people++; // Incrementa o contador de pessoas
+
+                if (xSemaphoreTake(xMatrizMutex, portMAX_DELAY) == pdTRUE)
+                {
+                    matriz_exibir();
+                    xSemaphoreGive(xMatrizMutex);
+                }
 
                 printf("Entrou uma pessoa. Total: %d\n", current_people);
 
@@ -231,6 +238,12 @@ void vTasksaida(void *pvParameters)
                 display_exibir();
                 xSemaphoreGive(xDisplayMutex);
             }
+
+            if (xSemaphoreTake(xMatrizMutex, portMAX_DELAY) == pdTRUE)
+            {
+                matriz_exibir();
+                xSemaphoreGive(xMatrizMutex);
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(10)); // Pequeno delay para evitar busy waiting
     }
@@ -249,6 +262,12 @@ void vTaskResetar(void *pvParameters)
             // Recria o semáforo com todos os tokens disponíveis
             vSemaphoreDelete(xButtonA_B);
             xButtonA_B = xSemaphoreCreateCounting(Max, Max);
+
+            if (xSemaphoreTake(xMatrizMutex, portMAX_DELAY) == pdTRUE)
+            {
+                matriz_exibir();
+                xSemaphoreGive(xMatrizMutex);
+            }
 
             if (xSemaphoreTake(xDisplayMutex, portMAX_DELAY) == pdTRUE)
             {
@@ -277,6 +296,11 @@ void vTaskResetar(void *pvParameters)
             printf("Contador resetado. Total: %d\n", current_people);
         }
     }
+}
+
+void matriz_exibir()
+{
+    npSetMatrixWithIntensity(caixa_de_numeros[current_people], 1.0);
 }
 
 void display_exibir()
