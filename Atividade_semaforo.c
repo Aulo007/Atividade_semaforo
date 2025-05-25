@@ -27,9 +27,16 @@ static ssd1306_t display;
 const int volatile Max = 8;      // Número máximo de pessoas no laboratório
 volatile int current_people = 0; // Contador de pessoas no laboratório
 
-// Flag global para indicar qual botão foi pressionado por último
-volatile bool last_button_was_A = true; // true = incrementar, false = decrementar
+typedef enum
+{
+    incrementar = 0,
+    decrementar = 1,
+    desativar = 2
+} botao_t; // Estados dos botões
 
+volatile botao_t generic_button_state = desativar;
+
+SemaphoreHandle_t xNotificar;
 SemaphoreHandle_t xButtonA_B;
 SemaphoreHandle_t xButtonC;
 SemaphoreHandle_t xLedsMutex;
@@ -53,35 +60,25 @@ void gpio_irq_handler(uint gpio, uint32_t events)
 
     if (gpio == BUTTON_A_PIN)
     {
-        // Verifica debounce para botão A
-        
-        if ( (current_time - last_button_a_time > DEBOUNCE_TIME_MS) && (current_people < Max))
+        // Verifica debounce para botão A - Entrada
+        if ((current_time - last_button_a_time > DEBOUNCE_TIME_MS) && (current_people < Max))
         {
-            // Só entra aqui, se o número de pessoas não forem máximas
-            // Por exemplo, posso dar 8 give, ou seja, liberar 8 tokens por vez, que corresponde ao meu máximo.
-            // Se eu dei 8 tokens, e cada um destes fora consumido, é necessário então, que seja apertado o botão b, para liberar eles
-            // Por exemplo, se eu der 8 tarefas aqui, e as 8 foram consumidas, então, aqui, não entra mais.
-            // printf("Botão A pressionado!\n"); // para debbuging
             last_button_a_time = current_time;
-            last_button_was_A = true; // Define flag para incrementar
-            xSemaphoreGiveFromISR(xButtonA_B, &xHigherPriorityTaskWoken);
+            generic_button_state = incrementar; // Define flag para incrementar
         }
     }
     else if (gpio == BUTTON_B_PIN)
     {
-        // Verifica debounce para botão B
-        if ( (current_time - last_button_b_time > DEBOUNCE_TIME_MS) && (current_people >= 0))
+        // Verifica debounce para botão B - Saída
+        if ((current_time - last_button_b_time > DEBOUNCE_TIME_MS) && (current_people > 0))
         {
-            // Só entra aqui, se tiver pessoas no laboratório, logo, esta ISR, irá givar um token, 
-            // printf("Botão B pressionado!\n"); // para debbuging
             last_button_b_time = current_time;
-            last_button_was_A = false; // Define flag para decrementar
-            xSemaphoreGiveFromISR(xButtonA_B, &xHigherPriorityTaskWoken);
+            generic_button_state = decrementar; // Define flag para decrementar
         }
     }
     else if (gpio == BUTTON_C_PIN)
     {
-        // Verifica debounce para botão C
+        // Verifica debounce para botão C - Reset
         if (current_time - last_button_c_time > DEBOUNCE_TIME_MS)
         {
             last_button_c_time = current_time;
@@ -112,7 +109,9 @@ int main(void)
     gpio_set_irq_enabled_with_callback(BUTTON_B_PIN, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
     gpio_set_irq_enabled_with_callback(BUTTON_C_PIN, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
 
-    xButtonA_B = xSemaphoreCreateCounting(Max, current_people);
+    // Criação dos semáforos
+    xNotificar = xSemaphoreCreateBinary();
+    xButtonA_B = xSemaphoreCreateCounting(Max, Max); // Inicia com Max tokens (lab vazio)
     xButtonC = xSemaphoreCreateBinary();
     xLedsMutex = xSemaphoreCreateMutex();
     xDisplayMutex = xSemaphoreCreateMutex();
@@ -133,21 +132,15 @@ void vTaskEntrada(void *pvParameters)
     // Task que trata apenas entradas (botão A)
     while (1)
     {
-        if (xSemaphoreTake(xButtonA_B, portMAX_DELAY) == pdTRUE)
+        if (generic_button_state == incrementar)
         {
-            if (last_button_was_A) // Verifica se foi o botão A
+            // Tenta consumir um token (entrada só é permitida se há tokens disponíveis)
+            if (xSemaphoreTake(xButtonA_B, portMAX_DELAY) == pdTRUE)
             {
-                current_people++; // Se não passar de 8 aqui, é porque deu certo.
+                generic_button_state = desativar;
+                current_people++; // Incrementa o contador de pessoas
 
-                if (current_people < Max)
-                {
-                    // current_people++; // Local que estava incrementando antes
-                    printf("Entrou uma pessoa. Total: %d\n", current_people);
-                }
-                else
-                {
-                    printf("Laboratório cheio!\n");
-                }
+                printf("Entrou uma pessoa. Total: %d\n", current_people);
 
                 if (xSemaphoreTake(xLedsMutex, portMAX_DELAY) == pdTRUE)
                 {
@@ -168,77 +161,64 @@ void vTaskEntrada(void *pvParameters)
 
                 if (xSemaphoreTake(xDisplayMutex, portMAX_DELAY) == pdTRUE)
                 {
-                    display_exibir();              // Atualiza o display
-                    xSemaphoreGive(xDisplayMutex); // Não se esqueça de liberar o mutex!
+                    display_exibir();
+                    xSemaphoreGive(xDisplayMutex);
                 }
 
                 if (xSemaphoreTake(xBuzzerMutex, portMAX_DELAY) == pdTRUE)
                 {
                     if (current_people == Max)
                     {
-                        ativar_buzzer_com_intensidade(BUZZER_PIN, 1); // Buzzer ativo quando cheio
+                        ativar_buzzer_com_intensidade(BUZZER_PIN, 1);
                         vTaskDelay(pdMS_TO_TICKS(200));
                         desativar_buzzer(BUZZER_PIN);
                     }
-
                     xSemaphoreGive(xBuzzerMutex);
                 }
             }
-            else
-            {
-                xSemaphoreGive(xButtonA_B);
-            }
         }
+        vTaskDelay(pdMS_TO_TICKS(10)); // Pequeno delay para evitar busy waiting
     }
 }
+
 void vTasksaida(void *pvParameters)
 {
     // Task que trata apenas saídas (botão B)
     while (1)
     {
-        if (xSemaphoreTake(xButtonA_B, portMAX_DELAY) == pdTRUE)
+        if (generic_button_state == decrementar)
         {
-            if (!last_button_was_A) // Verifica se foi o botão B
+            generic_button_state = desativar;
+            current_people--; // Decrementa o contador de pessoas
+            printf("Saiu uma pessoa. Total: %d\n", current_people);
+
+            // Libera um token (permite uma nova entrada)
+            xSemaphoreGive(xButtonA_B);
+
+            if (xSemaphoreTake(xLedsMutex, portMAX_DELAY) == pdTRUE)
             {
-                if (current_people > 0)
+                if (current_people == 0)
                 {
-                    current_people--;
-                    printf("Saiu uma pessoa. Total: %d\n", current_people);
+                    acender_led_rgb_cor(COLOR_BLUE);
                 }
-                else
+                else if (current_people == (Max - 1))
                 {
-                    printf("Laboratório vazio!\n");
+                    acender_led_rgb_cor(COLOR_YELLOW);
                 }
-
-                if (xSemaphoreTake(xLedsMutex, portMAX_DELAY) == pdTRUE)
+                else if (current_people > 0)
                 {
-                    if (current_people == Max)
-                    {
-                        acender_led_rgb_cor(COLOR_RED);
-                    }
-                    else if (current_people == (Max - 1))
-                    {
-                        acender_led_rgb_cor(COLOR_YELLOW);
-                    }
-                    else if (current_people > 0)
-                    {
-                        acender_led_rgb_cor(COLOR_GREEN);
-                    }
-
-                    xSemaphoreGive(xLedsMutex);
+                    acender_led_rgb_cor(COLOR_GREEN);
                 }
-
-                if (xSemaphoreTake(xDisplayMutex, portMAX_DELAY) == pdTRUE)
-                {
-                    display_exibir();              // Atualiza o display
-                    xSemaphoreGive(xDisplayMutex); // Não se esqueça de liberar o mutex!
-                }
+                xSemaphoreGive(xLedsMutex);
             }
-            else
+
+            if (xSemaphoreTake(xDisplayMutex, portMAX_DELAY) == pdTRUE)
             {
-                xSemaphoreGive(xButtonA_B);
+                display_exibir();
+                xSemaphoreGive(xDisplayMutex);
             }
         }
+        vTaskDelay(pdMS_TO_TICKS(10)); // Pequeno delay para evitar busy waiting
     }
 }
 
@@ -249,33 +229,34 @@ void vTaskResetar(void *pvParameters)
     {
         if (xSemaphoreTake(xButtonC, portMAX_DELAY) == pdTRUE)
         {
+            // Reset do sistema - lab volta a ficar vazio
             current_people = 0;
+
+            // Recria o semáforo com todos os tokens disponíveis
+            vSemaphoreDelete(xButtonA_B);
+            xButtonA_B = xSemaphoreCreateCounting(Max, Max);
 
             if (xSemaphoreTake(xDisplayMutex, portMAX_DELAY) == pdTRUE)
             {
-                display_exibir();              // Atualiza o display
-                xSemaphoreGive(xDisplayMutex); // Não se esqueça de liberar o mutex!
+                display_exibir();
+                xSemaphoreGive(xDisplayMutex);
             }
 
             if (xSemaphoreTake(xLedsMutex, portMAX_DELAY) == pdTRUE)
             {
-
-                acender_led_rgb_cor(COLOR_GREEN);
-
+                acender_led_rgb_cor(COLOR_BLUE); // Azul para lab vazio
                 xSemaphoreGive(xLedsMutex);
             }
 
             if (xSemaphoreTake(xBuzzerMutex, portMAX_DELAY) == pdTRUE)
             {
-
-                ativar_buzzer_com_intensidade(BUZZER_PIN, 1); // Buzzer ativo quando cheio
+                ativar_buzzer_com_intensidade(BUZZER_PIN, 1);
                 vTaskDelay(pdMS_TO_TICKS(200));
                 desativar_buzzer(BUZZER_PIN);
                 vTaskDelay(pdMS_TO_TICKS(200));
-                ativar_buzzer_com_intensidade(BUZZER_PIN, 1); // Buzzer ativo quando cheio
+                ativar_buzzer_com_intensidade(BUZZER_PIN, 1);
                 vTaskDelay(pdMS_TO_TICKS(200));
                 desativar_buzzer(BUZZER_PIN);
-
                 xSemaphoreGive(xBuzzerMutex);
             }
 
